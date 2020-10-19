@@ -481,16 +481,6 @@ def plot4(steps,
     ax1.set_title(title, fontsize=30)
     ax1.set_ylabel(ylabel1, fontsize=24)
 
-    # for ii in range(num_exp):
-    #     values_ = values3[:, ii]
-    #     color_ = color_list[ii]
-    #     lns.append(ax3.plot(steps, values_, color=color_, linewidth=2)[0])
-    # ax3.grid(color='k', linestyle=':', linewidth=1)
-    # ax3.set_yscale('log')
-    # ax3.tick_params(labelsize=18)
-    # ax3.xaxis.set_major_formatter(empty_formatter)
-    # ax3.set_ylabel(ylabel3, fontsize=24)
-
     for vals, ax, ylabel in zip([values2, values3], [ax2, ax3], [ylabel2, ylabel3]):
         for ii in range(num_exp):
             values_ = vals[:, ii]
@@ -678,4 +668,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-    # plot_folder("./results/mnist/online/momentum", title="MNIST, decay=0.99", stochastic=False)
