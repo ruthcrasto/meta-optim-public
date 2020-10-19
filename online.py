@@ -111,7 +111,7 @@ def _get_exp_logger(sess, log_folder):
 
 def online_smd(dataset_name='mnist',
                init_lr=1e-1,
-               momentum=0.9,
+               momentum=0.001,
                num_steps=20000,
                middle_decay=False,
                steps_per_update=10,
@@ -238,7 +238,7 @@ def online_smd(dataset_name='mnist',
         mom_name = 'beta1'
     else:
         raise ValueError('Unknown optimizer')
-    hp_dict = {'lr': init_lr, mom_name: momentum}
+    hp_dict = {'lr': init_lr} #, mom_name: momentum}
     hp_names = hp_dict.keys()
     hyperparams = dict([(hp_name, model.optimizer.hyperparams[hp_name])
                         for hp_name in hp_names])
@@ -256,13 +256,13 @@ def online_smd(dataset_name='mnist',
     hp = [model.optimizer.hyperparams[hp_name] for hp_name in hp_names]
     hp_grads_dict = {
         'lr': tf.placeholder(tf.float32, [], name='lr_grad'),
-        mom_name: tf.placeholder(
-            tf.float32, [], name='{}_grad'.format(mom_name))
+        # mom_name: tf.placeholder(
+        #     tf.float32, [], name='{}_grad'.format(mom_name))
     }
     hp_grads_plh = [hp_grads_dict[hp_name] for hp_name in hp_names]
     hp_grads_and_vars = list(zip(hp_grads_plh, hp))
-    cgrad = {'lr': (-1e1, 1e1), mom_name: (-1e1, 1e1)}
-    cval = {'lr': (1e-4, 1e1), mom_name: (1e-4, 1e0)}
+    cgrad = {'lr': (-1e1, 1e1)} #, mom_name: (-1e1, 1e1)}
+    cval = {'lr': (1e-4, 1e1)} #, mom_name: (1e-4, 1e0)}
     cgrad_ = [cgrad[hp_name] for hp_name in hp_names]
     cval_ = [cval[hp_name] for hp_name in hp_names]
     meta_train_op = meta_opt.apply_gradients(
@@ -340,12 +340,15 @@ def online_smd(dataset_name='mnist',
                             model.optimizer.assign_hyperparam(
                                 sess, hpname, hpval)
                     lr_ = hp_dict['lr']
-                    mom_ = hp_dict['mom']
+                    # mom_ = hp_dict['mom']
                 else:
                     hp_dict = sess.run(model.optimizer.hyperparams)
                 lr_log, mom_log = log_hp(hp_dict)
                 lr_list.append(lr_log)
                 mom_list.append(mom_log)
+
+            if ii == midpoint // 2:
+                m.optimizer.assign_hyperparam(sess, 'mom', 1 - 0.9)
 
             if ii == midpoint:
                 lr_before_mid = hp_dict['lr']
@@ -357,12 +360,15 @@ def online_smd(dataset_name='mnist',
 
             # Run regular training.
             if lr_ > 1e-6:
-                xd, yd = dataset.next_batch(bsize)
+                # Use CBL for first half of training
+                xd, yd = data_entry if (smd and not stochastic and ii < midpoint) else dataset.next_batch(bsize)
                 cost_, _ = sess.run(
                     [m.cost, m.train_op], feed_dict={
                         m.x: xd,
                         m.y: yd
                     })
+                if ii < midpoint:
+                    sess.run(m._retrieve_ema_op)
 
             # Evaluate every certain number of steps.
             if ii == 0 or (ii + 1) % steps_per_eval == 0:
@@ -426,24 +432,28 @@ def online_smd(dataset_name='mnist',
         momentum=np.array(mom_list))
 
 
-def plot_report_figure_combined(steps,
-                                values1,
-                                values2,
-                                condition,
-                                title,
-                                ylabel1,
-                                ylabel2,
-                                filename,
-                                subsample=1,
-                                figsize=(8, 7),
-                                include_legend=True,
-                                top_left=None,
-                                ylim1=None,
-                                ylim2=None):
-    fig, axes = plt.subplots(2, 1, figsize=figsize)
+def plot4(steps,
+          values1,
+          values2,
+          values3,
+          values4,
+          condition,
+          title,
+          ylabel1,
+          ylabel2,
+          ylabel3,
+          ylabel4,
+          filename,
+          subsample=1,
+          figsize=(8, 14),
+          include_legend=True,
+          top_left=None):
+    fig, axes = plt.subplots(4, 1, figsize=figsize)
     ax = axes.flatten()
     ax1 = ax[0]
     ax2 = ax[1]
+    ax3 = ax[2]
+    ax4 = ax[3]
 
     num_steps = values1.shape[0]
     num_exp = values1.shape[1]
@@ -456,35 +466,55 @@ def plot_report_figure_combined(steps,
 
     empty_formatter = ticker.FuncFormatter(empty_fmt)
     lns = []
-    color_list = ['red'] + ['blue'] * (num_exp - 1)
+    color_list = ['red', 'blue', 'green', 'orange', 'purple', 'cyan']
+
     for ii in range(num_exp):
         values_ = values1[0, :, ii]
         color_ = color_list[ii]
         lns.append(ax1.plot(steps, values_, color=color_, linewidth=2)[0])
     ax1.grid(color='k', linestyle=':', linewidth=1)
     ax1.set_yscale('log')
-    if ylim1 is not None:
-        ax1.set_ylim(*ylim1)
     ax1.tick_params(labelsize=18)
     ax1.xaxis.set_major_formatter(empty_formatter)
-    ax1.legend(labels=condition, handles=lns[:2], loc=3)
+    ax1.legend(labels=condition, handles=lns[:1], loc=3)
     plt.setp(ax1.get_legend().get_texts(), fontsize=18)
     ax1.set_title(title, fontsize=30)
     ax1.set_ylabel(ylabel1, fontsize=24)
 
-    ax2.xaxis.major.formatter._useMathText = True
-    ax2.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
-    ax2.set_yscale('log')
-    ax2.tick_params(labelsize=18)
-    values2 = values2.reshape([-1, subsample, num_exp])
-    values2 = values2[:, 0, :]
+    # for ii in range(num_exp):
+    #     values_ = values3[:, ii]
+    #     color_ = color_list[ii]
+    #     lns.append(ax3.plot(steps, values_, color=color_, linewidth=2)[0])
+    # ax3.grid(color='k', linestyle=':', linewidth=1)
+    # ax3.set_yscale('log')
+    # ax3.tick_params(labelsize=18)
+    # ax3.xaxis.set_major_formatter(empty_formatter)
+    # ax3.set_ylabel(ylabel3, fontsize=24)
+
+    for vals, ax, ylabel in zip([values2, values3], [ax2, ax3], [ylabel2, ylabel3]):
+        for ii in range(num_exp):
+            values_ = vals[:, ii]
+            color_ = color_list[ii]
+            lns.append(ax.plot(steps, values_, color=color_, linewidth=2)[0])
+        ax.grid(color='k', linestyle=':', linewidth=1)
+        ax.set_yscale('log')
+        ax.tick_params(labelsize=18)
+        ax.xaxis.set_major_formatter(empty_formatter)
+        ax.set_ylabel(ylabel, fontsize=24)
+
+    ax4.xaxis.major.formatter._useMathText = True
+    ax4.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+    ax4.set_yscale('log')
+    ax4.tick_params(labelsize=18)
+    values4 = values4.reshape([-1, subsample, num_exp])
+    values4 = values4[:, 0, :]
     for ii in range(num_exp):
-        values_ = values2[:, ii]
+        values_ = values4[:, ii]
         color_ = color_list[ii]
-        ax2.plot(steps, values_, color=color_, linewidth=2)
-    ax2.grid(color='k', linestyle=':', linewidth=1)
-    ax2.set_xlabel("Steps", fontsize=24)
-    ax2.set_ylabel(ylabel2, fontsize=24)
+        ax4.plot(steps, values_, color=color_, linewidth=2)
+    ax4.grid(color='k', linestyle=':', linewidth=1)
+    ax4.set_xlabel("Steps", fontsize=24)
+    ax4.set_ylabel(ylabel4, fontsize=24)
     plt.tight_layout(pad=2.0)
     plt.savefig(filename)
 
@@ -514,7 +544,7 @@ def open_folder(folder, stochastic=True):
     print(files)
     for fname in files:
         results_list.append(
-            np.load(os.path.join(folder, fname), encoding='latin1'))
+            np.load(os.path.join(folder, fname), allow_pickle=True, encoding='latin1'))
     return results_list
 
 
@@ -527,9 +557,7 @@ def plot_folder(folder, title, stochastic=True):
     """
     results = open_folder(folder, stochastic=stochastic)
     assert len(results) > 0, 'Cannot find any results'
-    ce_values = np.concatenate(
-        [np.expand_dims(r.item()['train_xent'][:-1], 1) for r in results],
-        axis=1)
+
     steps = np.concatenate(
         [np.expand_dims(r.item()['step'][:-1], 1) for r in results], axis=1)
     alpha_eff_values = np.concatenate(
@@ -538,14 +566,20 @@ def plot_folder(folder, title, stochastic=True):
             for r in results
         ],
         axis=1)
-    condition = ['Manual', 'SMD']
-    plot_report_figure_combined(
+
+    print(np.max([r.item()['train_acc'][-5:] for r in results[1:]]))
+    print(np.mean([r.item()['test_acc'][-5:] for r in results[1:]]))
+
+    plot4(
         steps,
-        ce_values,
+        np.concatenate([np.expand_dims(r.item()['train_xent'][:-1], 1) for r in results], axis=1),               np.concatenate([np.expand_dims(r.item()['lr'], 1) for r in results], axis=1),
+        np.concatenate([np.expand_dims(r.item()['momentum'], 1) for r in results], axis=1),
         alpha_eff_values,
-        condition,
+        ['Manual', 'SMD'],
         title,
         'Loss',
+        'Learning Rate',
+        'Momentum',
         'Eff. Learning Rate',
         os.path.join(
             folder, 'combined_{}.pdf'.format('stoc' if stochastic else 'det')),
@@ -581,27 +615,27 @@ def run_dataset(exp_folder, dataset_name, best_lr, lr_list, optimizer,
                              exp_folder=result_folder))
 
     id_len = 1
-    for jj, init_lr in enumerate(lr_list):
-        with tf.Graph().as_default():
-            result_folder = os.path.join(exp_folder,
-                                         '{:03d}_stoc_lr_{:.0e}'.format(
-                                             jj + id_len, init_lr))
-            savepath = os.path.join(result_folder, 'result.npy')
-            if os.path.exists(savepath):
-                log.info('{} exists, skip'.format(savepath))
-            else:
-                save_results(savepath,
-                             online_smd(
-                                 dataset_name=dataset_name,
-                                 init_lr=init_lr,
-                                 num_meta_steps=num_meta_steps,
-                                 steps_per_update=steps_per_update,
-                                 stochastic=True,
-                                 optimizer=optimizer,
-                                 num_steps=num_steps,
-                                 exp_folder=result_folder))
-
-    id_len = len(lr_list) + 1
+    # for jj, init_lr in enumerate(lr_list):
+    #     with tf.Graph().as_default():
+    #         result_folder = os.path.join(exp_folder,
+    #                                      '{:03d}_stoc_lr_{:.0e}'.format(
+    #                                          jj + id_len, init_lr))
+    #         savepath = os.path.join(result_folder, 'result.npy')
+    #         if os.path.exists(savepath):
+    #             log.info('{} exists, skip'.format(savepath))
+    #         else:
+    #             save_results(savepath,
+    #                          online_smd(
+    #                              dataset_name=dataset_name,
+    #                              init_lr=init_lr,
+    #                              num_meta_steps=num_meta_steps,
+    #                              steps_per_update=steps_per_update,
+    #                              stochastic=True,
+    #                              optimizer=optimizer,
+    #                              num_steps=num_steps,
+    #                              exp_folder=result_folder))
+    #
+    # id_len = len(lr_list) + 1
     for jj, init_lr in enumerate(lr_list):
         with tf.Graph().as_default():
             result_folder = os.path.join(exp_folder,
@@ -638,9 +672,10 @@ def main():
                     FLAGS.steps_per_update)
     else:
         raise ValueError('Dataset not supported.')
-    plot_folder(exp_folder, FLAGS.dataset.upper(), True)
+    #plot_folder(exp_folder, FLAGS.dataset.upper(), True)
     plot_folder(exp_folder, FLAGS.dataset.upper(), False)
 
 
 if __name__ == '__main__':
     main()
+    # plot_folder("./results/mnist/online/momentum", title="MNIST, decay=0.99", stochastic=False)

@@ -390,7 +390,13 @@ class Model(object):
                 opt = AdamOptimizer(config.init_lr, dtype=dtype)
             else:
                 raise ValueError('Unknown Optimizer')
-            train_op = opt.minimize(cost, global_step=global_step)
+            opt_op = opt.minimize(cost, global_step=global_step)
+            ema = tf.train.ExponentialMovingAverage(0.99)
+            with tf.control_dependencies([opt_op]):
+                train_op = ema.apply(self.var_list)
+
+            self._retrieve_ema_op = tf.group(
+                [tf.assign(var, ema.average(var)) for var in self.var_list])
             self._train_op = train_op
             self._optimizer = opt
             self._global_step = global_step
